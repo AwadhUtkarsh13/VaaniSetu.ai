@@ -1,0 +1,22 @@
+[project]
+name = "vaanisetu-ai"
+version = "1.0.0"
+description = "Multilingual, voice-first assistant for PM-KISAN, Ayushman Bharat PM-JAY and CPGRAMS grievances"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+# RUF001-3: Devanagari / Unicode text is intentional. SIM905: "a b c".split() word lists read better.
+ignore = ["RUF001", "RUF002", "RUF003", "SIM905"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"server/mailer.py" = ["E501"]
+"src/agent/prompts.py" = ["E501"]  # natural-language prompt text
