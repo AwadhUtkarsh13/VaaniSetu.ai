@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, streamChat, streamVoice, type ChatEvent, type ChatMessage } from "../api";
+import { api, ApiError, streamChat, type ChatEvent, type ChatMessage } from "../api";
 import { useAuth } from "../auth";
+import { playAudio } from "./audioPlayer";
 import { useLibrary } from "./Library";
 
 export interface UiMessage extends ChatMessage {
@@ -22,8 +23,8 @@ interface ChatSessionState {
   setLanguage: (code: string) => void;
   setSpeak: (on: boolean) => void;
   open: (id: string | null) => void;
-  send: (text: string, onCreated?: (id: string) => void) => void;
-  sendVoice: (audio: Blob, onCreated?: (id: string) => void) => void;
+  /** `inputMode: "voice"` = a reviewed speech transcript; its reply is always spoken. */
+  send: (text: string, onCreated?: (id: string) => void, inputMode?: "text" | "voice") => void;
   stop: () => void;
 }
 
@@ -45,13 +46,6 @@ function store(key: string, value: string) {
   } catch {
     /* private mode: preference just won't persist */
   }
-}
-
-let currentAudio: HTMLAudioElement | null = null;
-export function playAudio(audio: { data: string; mime: string }) {
-  currentAudio?.pause();
-  currentAudio = new Audio(`data:${audio.mime};base64,${audio.data}`);
-  void currentAudio.play().catch(() => {});
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -122,7 +116,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           meta: {},
           created_at: now,
           pending: true,
-          status: inputMode === "voice" ? "Listening to your voice message" : "Reading your message",
+          status: "Reading your message",
         },
       ]);
       const controller = new AbortController();
@@ -155,16 +149,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             setMessages((list) =>
               list.map((m) => {
                 if (m.id === userId) {
-                  // Keep what the user typed (or the transcript) on screen; the server stores it redacted.
-                  const shown = event.transcript ?? m.content;
-                  return event.user_message ? { ...event.user_message, content: shown } : { ...m, content: shown };
+                  // Keep what the user typed (or reviewed) on screen; the server stores it redacted.
+                  return event.user_message ? { ...event.user_message, content: m.content } : m;
                 }
                 if (m.id === placeholderId) return { ...event.message, audio: event.audio };
                 return m;
               }),
             );
             // Spoken questions always get a spoken answer; typed ones follow "Speak replies".
-            if (event.audio && (inputMode === "voice" || prefs.current.speak)) playAudio(event.audio);
+            if (event.audio && (inputMode === "voice" || prefs.current.speak))
+              playAudio(`data:${event.audio.mime};base64,${event.audio.data}`, String(event.message.id));
             break;
           }
           case "error":
@@ -188,29 +182,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 
   const send = useCallback(
-    (text: string, onCreated?: (id: string) => void) => {
-      const again = () => send(text);
+    (text: string, onCreated?: (id: string) => void, inputMode: "text" | "voice" = "text") => {
+      const again = () => send(text, undefined, inputMode);
       run(
         text,
-        "text",
+        inputMode,
         (conversation_id, onEvent, signal) =>
-          streamChat({ message: text, conversation_id, language: prefs.current.language, speak: prefs.current.speak }, onEvent, signal),
-        again,
-        onCreated,
-      );
-    },
-    [run],
-  );
-
-  const sendVoice = useCallback(
-    (audio: Blob, onCreated?: (id: string) => void) => {
-      const again = () => sendVoice(audio);
-      const language = prefs.current.language;
-      run(
-        "🎙️ Voice message",
-        "voice",
-        (conversation_id, onEvent, signal) =>
-          streamVoice({ audio, conversation_id, language, speak: true }, onEvent, signal),
+          streamChat(
+            {
+              message: text,
+              conversation_id,
+              language: prefs.current.language,
+              speak: inputMode === "voice" || prefs.current.speak,
+              input_mode: inputMode,
+            },
+            onEvent,
+            signal,
+          ),
         again,
         onCreated,
       );
@@ -221,8 +209,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const stop = useCallback(() => controllerRef.current?.abort(), []);
 
   const value = useMemo(
-    () => ({ activeId, messages, loading, loadError, streaming, language, speak, setLanguage, setSpeak, open, send, sendVoice, stop }),
-    [activeId, messages, loading, loadError, streaming, language, speak, setLanguage, setSpeak, open, send, sendVoice, stop],
+    () => ({ activeId, messages, loading, loadError, streaming, language, speak, setLanguage, setSpeak, open, send, stop }),
+    [activeId, messages, loading, loadError, streaming, language, speak, setLanguage, setSpeak, open, send, stop],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

@@ -139,6 +139,28 @@ class VaaniSetuPipeline:
     def vault(self, thread_id: str) -> PIIVault:
         return self._vaults.setdefault(thread_id, PIIVault())
 
+    async def transcribe(self, audio_b64: str, language: str = "auto") -> str:
+        """Speech to text only, so the citizen can review (and edit) the question before sending.
+
+        The reply language is not used as a recognition hint: speech models detect the spoken
+        language themselves (a wrong hint would hurt). Bhashini needs a source language.
+        """
+        if self.bhashini is not None:
+            lang = language if language in BHASHINI_LANGUAGES else "hi"
+            source, _ = await self.bhashini.speech_to_english(audio_b64, lang)
+            return source.strip()
+        if self.speech is not None:
+            return await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", "auto")
+        raise SpeechError("Voice isn't available")
+
+    async def speak(self, text: str, language: str) -> tuple[bytes, str]:
+        """Read an (already localised, redacted) reply aloud. Returns (audio bytes, MIME type)."""
+        if self.speech is not None:
+            return await self.speech.synthesize(speakable(text)), "audio/mpeg"
+        if self.bhashini is not None and language in BHASHINI_LANGUAGES:
+            return base64.b64decode(await self.bhashini.speak(speakable(text), language)), "audio/wav"
+        raise SpeechError("Voice isn't available")
+
     async def handle_turn(
         self,
         thread_id: str,
@@ -148,8 +170,12 @@ class VaaniSetuPipeline:
         language: str = "auto",
         want_audio: bool = False,
         on_status: StatusCallback | None = None,
+        input_mode: str | None = None,
     ) -> TurnResult:
-        """`language`: "auto" (detect), "en", "hinglish" or a Bhashini code. Audio is base64 WAV."""
+        """`language`: "auto" (detect), "en", "hinglish" or a Bhashini code. Audio is base64 WAV.
+
+        `input_mode="voice"` marks text that came from a reviewed voice transcript.
+        """
         if (text is None) == (audio_b64 is None):
             raise ValueError("Provide exactly one of text or audio_b64")
 
@@ -159,7 +185,7 @@ class VaaniSetuPipeline:
 
         trace = TurnTrace(
             thread_id=thread_id,
-            input_mode="voice" if audio_b64 else "text",
+            input_mode="voice" if audio_b64 or input_mode == "voice" else "text",
             language=language,
         )
         degraded: list[str] = []
@@ -177,7 +203,7 @@ class VaaniSetuPipeline:
                         language = lang if language == "auto" else language
                     else:
                         assert self.speech is not None
-                        transcript = await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", language)
+                        transcript = await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", "auto")
                         text = transcript
                 except (BhashiniError, SpeechError) as exc:
                     logger.warning("Speech-to-text failed: %s", exc)

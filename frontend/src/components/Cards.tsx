@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import type { Card, CardItem, Citation, Verdict } from "../api";
-import { PiiChip } from "./AnswerText";
+import { CitationChip, PiiChip } from "./AnswerText";
 import { Button, useToast } from "./ui";
 
 export const VERDICTS: Record<Verdict, { label: string; tone: string; icon: string; note: string }> = {
@@ -54,9 +54,7 @@ function Rules({ citations }: { citations: Citation[] }) {
       <div className="rules-title">Official rules applied</div>
       <div className="rules-list">
         {citations.map((c) => (
-          <span key={c.id} className="cite-chip" title={c.id}>
-            {c.label}
-          </span>
+          <CitationChip key={c.id} label={c.label} />
         ))}
       </div>
     </div>

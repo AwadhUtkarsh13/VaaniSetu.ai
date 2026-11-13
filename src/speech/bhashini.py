@@ -211,6 +211,15 @@ class BhashiniClient:
         except (StopIteration, KeyError, IndexError) as exc:
             raise BhashiniError("No 'tts' audio in Bhashini response") from exc
 
+    async def speak(self, text: str, language: str) -> str:
+        """TTS only, for text that is already in `language`. Returns base64 WAV."""
+        with stage("tts_ms", "bhashini.tts"):
+            out = await self.compute([Task("tts", language)], {"input": [{"source": text}]})
+        try:
+            return next(o for o in out if o.get("taskType") == "tts")["audio"][0]["audioContent"]
+        except (StopIteration, KeyError, IndexError) as exc:
+            raise BhashiniError("No 'tts' audio in Bhashini response") from exc
+
 
 def _output(response: list[dict[str, Any]], task_type: str) -> dict[str, Any]:
     for item in response:

@@ -113,7 +113,8 @@ def build_card(result: TurnResult) -> dict[str, Any] | None:
         }
     if result.awaiting_confirmation:
         return {"kind": "confirm", "flow": result.active_flow, "items": _items(result.slots)}
-    if result.active_flow and result.slots:
+    # Progress only on replies that belong to the check (not on a question answered mid-check).
+    if result.active_flow and result.slots and result.intent == result.active_flow:
         remaining = len(missing_slots(Intent(result.active_flow), result.slots))
         return {
             "kind": "progress",
@@ -235,6 +236,7 @@ async def turn_events(
     speak: bool,
     text: str | None = None,
     audio_b64: str | None = None,
+    input_mode: str = "text",
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one turn and yield stream events. The caller has already checked readiness."""
     pipeline = engine.pipeline
@@ -269,6 +271,7 @@ async def turn_events(
                 language=language,
                 want_audio=speak,
                 on_status=queue.put,
+                input_mode=input_mode,
             )
         )
         while not task.done():

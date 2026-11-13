@@ -10,7 +10,8 @@
 
 - **Create an account** with your name, email, phone number and password. Your email is confirmed with a 6-digit code.
 - **Ask in your own language**: English, Hindi (Devanagari), Hinglish or another Indian language. The reply comes back in the language you used, or in the one you choose.
-- **Speak instead of typing.** Press the mic, ask your question, and hear the reply read aloud.
+- **Speak instead of typing.** Press the mic and ask your question. VaaniSetu shows you what it heard first, so you can fix a word or record again before anything is sent, and the answer is read aloud.
+- **Listen to any answer.** Every reply has a **Listen** button that reads it aloud, whether you typed or spoke the question.
 - **Get answers from the official rules** of PM-KISAN and Ayushman Bharat PM-JAY, each with the section it comes from (for example *PM-KISAN §2.1 Amount of benefit*). If the rules don't cover a question, VaaniSetu says so instead of guessing.
 - **Check your eligibility** for PM-KISAN or PM-JAY. Give details in any order, several at once; it asks only for what's missing. The verdict (*Eligible*, *Likely eligible*, *Needs verification* or *Not eligible*) comes with the reasons, the rules applied and the next steps.
 - **Prepare a public grievance for CPGRAMS.** Describe the problem in your own words; VaaniSetu works out the right department, category and urgency, writes a clear summary, and gives you a ready-to-file grievance.
@@ -40,7 +41,7 @@ Every step is timed, so each answer can show what it took: privacy masking, rule
 VaaniSetu is measured on a fixed set of 30 real-world conversations: plain English and Hinglish questions, Hindi in Devanagari, step-by-step eligibility checks with noisy code-mixed answers ("2 acre", "10 hazaar mahina", "haan"), tricky exclusions (a government teacher who owns farmland, a tenant farmer), grievances, and questions the rules don't cover or that try to misuse the assistant.
 
 <!-- BENCHMARK:START -->
-_Run 2026-11-12 · model `gpt-4.1-mini` · 30 cases / 58 turns · `python scripts/run_eval.py`_
+_Run 2026-11-13 · model `gpt-4.1-mini` · 30 cases / 58 turns · `python scripts/run_eval.py`_
 
 | Metric | Score |
 |---|---|
@@ -53,8 +54,8 @@ _Run 2026-11-12 · model `gpt-4.1-mini` · 30 cases / 58 turns · `python script
 | Eligibility verdict accuracy | 1.00 |
 | Grievance payload completion | 1.00 |
 | Refusal accuracy (unanswerable) | 1.00 |
-| Latency p50 / p95 per turn | 3454 ms / 6109 ms |
-| LLM calls / tokens per turn | 2.4 / 2131 |
+| Latency p50 / p95 per turn | 3107 ms / 6353 ms |
+| LLM calls / tokens per turn | 2.4 / 2211 |
 <!-- BENCHMARK:END -->
 
 In short:
@@ -150,7 +151,7 @@ Your browser opens **http://localhost:8000**. The first start takes a little lon
 
 1. **Create an account.** Click *Create an account* and enter your name, email, phone and a password.
 2. **Confirm your email.** Enter the 6-digit code from the email (check your spam folder).
-3. **Ask anything.** Type, tap one of the suggestions, or press the 🎙️ mic and speak. Try *"PM-KISAN mein saal ka kitna paisa milta hai?"*.
+3. **Ask anything.** Type, tap one of the suggestions, or press the mic and speak, then press **Done**. Check the question shown in the box (edit it, **Record again** or **Discard**) and press **Send**. Try *"PM-KISAN mein saal ka kitna paisa milta hai?"*. Press **Listen** under any answer to hear it.
 4. **Check eligibility.** Say *"Am I eligible for Ayushman Bharat?"* and answer the questions. When the summary appears, tap **Yes, confirm**, **Change something** or **Cancel**.
 5. **Prepare a complaint.** Describe the problem, for example *"Meri PM-KISAN ki kist 6 mahine se nahi aayi"*. When it's ready, use **Copy complaint text** and **Open CPGRAMS portal** to file it.
 6. **Find your results** under **My applications**, where you can also download the portal-ready JSON.

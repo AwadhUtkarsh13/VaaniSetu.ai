@@ -37,6 +37,10 @@
 - Email: `SMTP_*` copied from the CRAG / my-project `.env` (same Gmail account), sender shown as "VaaniSetu AI". Verified by sending a settings-check email and a sample verification-code email (both accepted by Gmail).
 - The unit-test suite was removed from the repository at the author's request (ADR-15); a backup existed only in the session scratch folder.
 
+## Update 2026-11-13
+- Voice review before sending (edit / record again / discard), **Listen** button on every answer, readable source chips, and a routing fix for questions asked during an eligibility check (ADR-16).
+- Verified: 30-case benchmark all 1.00, 27/27 routing decisions, 14/14 real-browser checks of the new voice flow.
+
 ## Next steps
 1. `git commit` and `git push` to https://github.com/AwadhUtkarsh13/VaaniSetu.ai (remote has one "Initial commit" with a README; merge on top of it).
 2. Optional: Bhashini or Sarvam AI keys as alternative speech providers.

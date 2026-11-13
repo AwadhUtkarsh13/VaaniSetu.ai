@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { useNavigate, useParams } from "react-router";
 import { api, LANGUAGES, type ChatMessage } from "../api";
 import { firstName, useAuth } from "../auth";
-import AnswerText, { stripMarkup } from "../components/AnswerText";
+import AnswerText, { CitationChip, stripMarkup } from "../components/AnswerText";
+import { playAudio, stopAudio, usePlayingKey } from "../components/audioPlayer";
 import CardView from "../components/Cards";
-import { playAudio, useChatSession, type UiMessage } from "../components/ChatSession";
+import { useChatSession, type UiMessage } from "../components/ChatSession";
 import { Button, Dots, Skeleton, Spinner, useToast } from "../components/ui";
 import { useRecorder } from "../components/useRecorder";
 
@@ -42,7 +43,7 @@ function BehindTheAnswer({ meta, masked }: { meta: ChatMessage["meta"]; masked: 
           <b>Privacy</b>
           <span>
             {masked.length
-              ? `${masked.length} personal detail${masked.length > 1 ? "s" : ""} masked before the AI saw your message`
+              ? `${masked.length} personal detail${masked.length > 1 ? "s" : ""} hidden before the AI saw your message`
               : "No personal details found in your message"}
           </span>
         </div>
@@ -68,11 +69,71 @@ function BehindTheAnswer({ meta, masked }: { meta: ChatMessage["meta"]; masked: 
   );
 }
 
+function MicIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"
+      />
+    </svg>
+  );
+}
+
+function SpeakerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4Zm-2.5-8.7v2.06A7 7 0 0 1 14 18.64v2.06A9 9 0 0 0 14 3.3Z"
+      />
+    </svg>
+  );
+}
+
+/** "Listen" under every answer: reads it aloud (from the stored, masked text); click again to stop. */
+function ListenButton({ message, conversationId }: { message: UiMessage; conversationId: string | null }) {
+  const notify = useToast();
+  const key = String(message.id);
+  const playing = usePlayingKey() === key;
+  const [loading, setLoading] = useState(false);
+  const stored = typeof message.id === "number";
+  if (!message.audio && !(stored && conversationId)) return null;
+
+  async function listen() {
+    if (playing) return stopAudio();
+    if (message.audio) return playAudio(`data:${message.audio.mime};base64,${message.audio.data}`, key);
+    setLoading(true);
+    try {
+      const blob = await api.messageSpeech(conversationId!, message.id);
+      playAudio(URL.createObjectURL(blob), key, true);
+    } catch (err) {
+      notify((err as Error).message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      className={`listen-btn${playing ? " playing" : ""}`}
+      onClick={() => void listen()}
+      disabled={loading}
+      title="Read this answer aloud"
+    >
+      {loading ? <Spinner /> : <SpeakerIcon />}
+      {loading ? "Preparing audio" : playing ? "Stop" : "Listen"}
+    </button>
+  );
+}
+
 function Message({
   message,
   previous,
   isLast,
   streaming,
+  voiceOn,
+  conversationId,
   onReply,
   onEdit,
 }: {
@@ -80,6 +141,8 @@ function Message({
   previous?: UiMessage;
   isLast: boolean;
   streaming: boolean;
+  voiceOn: boolean;
+  conversationId: string | null;
   onReply: (text: string) => void;
   onEdit: () => void;
 }) {
@@ -88,7 +151,11 @@ function Message({
     return (
       <div className="msg msg-user">
         <div className="bubble-user">
-          {message.meta?.input_mode === "voice" && <span className="voice-badge">🎙️</span>}
+          {message.meta?.input_mode === "voice" && (
+            <span className="voice-badge" title="Asked by voice">
+              <MicIcon size={14} />
+            </span>
+          )}
           <AnswerText text={message.content} className="user-text" />
         </div>
       </div>
@@ -126,20 +193,14 @@ function Message({
           )}
           {meta.citations && meta.citations.length > 0 && !card && (
             <div className="sources">
-              <div className="sources-title">From the official rules</div>
+              <div className="sources-title">Sources: official scheme rules</div>
               {meta.citations.map((c) => (
-                <span key={c.id} className="cite-chip">
-                  {c.label}
-                </span>
+                <CitationChip key={c.id} label={c.label} />
               ))}
             </div>
           )}
           <div className="meta-row">
-            {message.audio && (
-              <button className="link-btn" onClick={() => playAudio(message.audio!)}>
-                ▶ Play reply
-              </button>
-            )}
+            {voiceOn && <ListenButton message={message} conversationId={conversationId} />}
             <button
               className="link-btn"
               onClick={() =>
@@ -159,49 +220,42 @@ function Message({
   );
 }
 
-function VoiceButton({ disabled, onAudio }: { disabled: boolean; onAudio: (wav: Blob) => void }) {
-  const notify = useToast();
-  const recorder = useRecorder((wav, seconds) => {
-    if (seconds < 0.6) notify("Hold on a little longer — that was too short.", "error");
-    else onAudio(wav);
-  });
-  useEffect(() => {
-    if (recorder.state === "denied") notify("Microphone access was blocked. Allow it in the browser to speak.", "error");
-  }, [recorder.state, notify]);
-  if (recorder.state === "unsupported") return null;
-  const recording = recorder.state === "recording";
-  return recording ? (
-    <div className="recording">
-      <span className="rec-dot" style={{ transform: `scale(${1 + recorder.level * 0.8})` }} />
-      <span className="rec-time">0:{String(recorder.seconds).padStart(2, "0")}</span>
-      <Button size="sm" variant="ghost" onClick={recorder.cancel}>
-        Cancel
-      </Button>
-      <Button size="sm" onClick={recorder.stop}>
-        Send voice
-      </Button>
-    </div>
-  ) : (
-    <button className="mic-btn" type="button" disabled={disabled} onClick={() => void recorder.start()} title="Speak your message">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-        <path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z" />
-      </svg>
-      <span className="sr-only">Speak</span>
-    </button>
-  );
-}
-
 export default function ChatPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { messages, loading, loadError, streaming, open, send, sendVoice, stop, activeId, language, setLanguage, speak, setSpeak } =
+  const notify = useToast();
+  const { messages, loading, loadError, streaming, open, send, stop, activeId, language, setLanguage, speak, setSpeak } =
     useChatSession();
   const [draft, setDraft] = useState("");
   const [voice, setVoice] = useState<string | null>(null);
+  const [fromVoice, setFromVoice] = useState(false); // the draft is a speech transcript under review
+  const [transcribing, setTranscribing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
+  const languageRef = useRef(language);
+  languageRef.current = language;
+
+  const recorder = useRecorder((wav, seconds) => {
+    if (seconds < 0.6) {
+      notify("That was too short. Press the mic and speak your question.", "error");
+      return;
+    }
+    setTranscribing(true);
+    api
+      .transcribe(wav, languageRef.current)
+      .then(({ text }) => {
+        setDraft(text);
+        setFromVoice(true);
+        window.setTimeout(() => inputRef.current?.focus(), 0);
+      })
+      .catch((err: Error) => notify(err.message, "error"))
+      .finally(() => setTranscribing(false));
+  });
+  useEffect(() => {
+    if (recorder.state === "denied") notify("Microphone access was blocked. Allow it in the browser to speak.", "error");
+  }, [recorder.state, notify]);
 
   useEffect(() => {
     open(id ?? null);
@@ -227,7 +281,8 @@ export default function ChatPage() {
     if (!q || streaming) return;
     stick.current = true;
     setDraft("");
-    send(q, onCreated);
+    send(q, onCreated, fromVoice ? "voice" : "text");
+    setFromVoice(false);
     inputRef.current?.focus();
   }
 
@@ -238,8 +293,17 @@ export default function ChatPage() {
     }
   }
 
+  function recordAgain() {
+    setDraft("");
+    setFromVoice(false);
+    void recorder.start();
+  }
+
   const showWelcome = !id && !activeId && messages.length === 0;
   const waitingForConfirm = messages.at(-1)?.meta?.awaiting_confirmation && !streaming;
+  const recording = recorder.state === "recording";
+  const micAvailable = !!voice && recorder.state !== "unsupported";
+  const reviewing = fromVoice && !!draft && !recording && !transcribing;
 
   return (
     <div className="chat">
@@ -262,7 +326,7 @@ export default function ChatPage() {
             </span>
             <span className="switch-text">
               <b>Speak replies</b>
-              <span>Read answers aloud</span>
+              <span>Read typed answers aloud too</span>
             </span>
           </label>
         )}
@@ -294,7 +358,8 @@ export default function ChatPage() {
                 ))}
               </div>
               <p className="privacy-note">
-                🔒 Aadhaar, PAN, phone, bank and UPI numbers are masked before the AI sees your message, and are never saved.
+                Your privacy: Aadhaar, PAN, phone, bank and UPI numbers are hidden before the AI sees your message, and are
+                never saved.
               </p>
             </div>
           ) : loading ? (
@@ -313,6 +378,8 @@ export default function ChatPage() {
                 previous={messages[i - 1]}
                 isLast={i === messages.length - 1}
                 streaming={streaming}
+                voiceOn={!!voice}
+                conversationId={activeId}
                 onReply={ask}
                 onEdit={() => {
                   setDraft("Please change ");
@@ -324,40 +391,93 @@ export default function ChatPage() {
         </div>
       </div>
       <div className="composer-wrap">
+        {reviewing && (
+          <div className="voice-review">
+            <div className="voice-review-text">
+              <b>Check your question</b>
+              <span>This is what we heard. Fix anything that's wrong, then press Send.</span>
+            </div>
+            <div className="voice-review-actions">
+              <Button type="button" size="sm" variant="secondary" onClick={recordAgain} disabled={streaming}>
+                <MicIcon size={16} /> Record again
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDraft("");
+                  setFromVoice(false);
+                }}
+              >
+                Discard
+              </Button>
+            </div>
+          </div>
+        )}
         <form
-          className="composer"
+          className={`composer${reviewing ? " reviewing" : ""}`}
           onSubmit={(e) => {
             e.preventDefault();
             ask(draft);
           }}
         >
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={waitingForConfirm ? "Reply yes, no, or tell me what to change…" : "Type your question… (Hindi, English or Hinglish)"}
-            maxLength={2000}
-            autoFocus
-          />
-          {voice && (
-            <VoiceButton
-              disabled={streaming}
-              onAudio={(wav) => {
-                stick.current = true;
-                sendVoice(wav, onCreated);
-              }}
-            />
-          )}
-          {streaming ? (
-            <Button type="button" variant="secondary" onClick={stop}>
-              <Spinner /> Stop
-            </Button>
+          {recording ? (
+            <div className="recording">
+              <span className="rec-dot" style={{ transform: `scale(${1 + recorder.level * 0.8})` }} />
+              <span className="rec-label">Listening… speak your question</span>
+              <span className="rec-time">0:{String(recorder.seconds).padStart(2, "0")}</span>
+              <Button type="button" size="sm" variant="ghost" onClick={recorder.cancel}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={recorder.stop}>
+                Done
+              </Button>
+            </div>
+          ) : transcribing ? (
+            <div className="recording">
+              <Spinner />
+              <span className="rec-label">Converting your speech to text…</span>
+            </div>
           ) : (
-            <Button type="submit" disabled={!draft.trim()}>
-              Send
-            </Button>
+            <>
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={draft}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (!e.target.value.trim()) setFromVoice(false);
+                }}
+                onKeyDown={onKeyDown}
+                placeholder={
+                  waitingForConfirm ? "Reply yes, no, or tell me what to change…" : "Type or speak your question… (Hindi, English or Hinglish)"
+                }
+                maxLength={2000}
+                autoFocus
+              />
+              {micAvailable && (
+                <button
+                  className="mic-btn"
+                  type="button"
+                  disabled={streaming}
+                  onClick={() => (reviewing ? recordAgain() : void recorder.start())}
+                  title="Speak your question"
+                >
+                  <MicIcon />
+                  <span className="sr-only">Speak</span>
+                </button>
+              )}
+              {streaming ? (
+                <Button type="button" variant="secondary" onClick={stop}>
+                  <Spinner /> Stop
+                </Button>
+              ) : (
+                <Button type="submit" disabled={!draft.trim()}>
+                  Send
+                </Button>
+              )}
+            </>
           )}
         </form>
         <p className="composer-note">

@@ -212,6 +212,33 @@ export const api = {
   listApplications: () => request<ApplicationItem[]>("/api/applications"),
   application: (id: string) => request<ApplicationDetail>(`/api/applications/${id}`),
   deleteApplication: (id: string) => request<void>(`/api/applications/${id}`, { method: "DELETE" }),
+
+  /** Speech to text only: the citizen reviews (and can edit) the question before sending it. */
+  transcribe: (audio: Blob, language: string) => {
+    const form = new FormData();
+    form.append("audio", audio, "voice.wav");
+    form.append("language", language);
+    return request<{ text: string }>("/api/chat/transcribe", { method: "POST", body: form });
+  },
+
+  /** The reply read aloud (MP3/WAV), generated on demand from the stored, masked text. */
+  messageSpeech: async (conversationId: string, messageId: number | string): Promise<Blob> => {
+    let response: Response;
+    try {
+      response = await fetch(`/api/conversations/${conversationId}/messages/${messageId}/speech`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } catch {
+      throw toApiError(0, null);
+    }
+    if (!response.ok) {
+      const err = toApiError(response.status, await response.json().catch(() => null));
+      signalUnauthorized(err);
+      throw err;
+    }
+    return response.blob();
+  },
 };
 
 async function readStream(response: Response, onEvent: (event: ChatEvent) => void): Promise<void> {
@@ -239,7 +266,13 @@ async function readStream(response: Response, onEvent: (event: ChatEvent) => voi
 }
 
 export async function streamChat(
-  body: { message: string; conversation_id: string | null; language: string; speak: boolean },
+  body: {
+    message: string;
+    conversation_id: string | null;
+    language: string;
+    speak: boolean;
+    input_mode: "text" | "voice";
+  },
   onEvent: (event: ChatEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
@@ -252,26 +285,6 @@ export async function streamChat(
       body: JSON.stringify(body),
       signal,
     });
-  } catch (e) {
-    if ((e as Error).name === "AbortError") throw e;
-    throw toApiError(0, null);
-  }
-  await readStream(response, onEvent);
-}
-
-export async function streamVoice(
-  body: { audio: Blob; conversation_id: string | null; language: string; speak: boolean },
-  onEvent: (event: ChatEvent) => void,
-  signal: AbortSignal,
-): Promise<void> {
-  const form = new FormData();
-  form.append("audio", body.audio, "voice.wav");
-  if (body.conversation_id) form.append("conversation_id", body.conversation_id);
-  form.append("language", body.language);
-  form.append("speak", String(body.speak));
-  let response: Response;
-  try {
-    response = await fetch("/api/chat/voice", { method: "POST", credentials: "same-origin", body: form, signal });
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw toApiError(0, null);

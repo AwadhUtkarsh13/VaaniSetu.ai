@@ -224,6 +224,7 @@ class ApplicationDetail(ApplicationOut):
 
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    input_mode: Literal["text", "voice"] = "text"  # voice = a reviewed speech transcript
     conversation_id: str | None = None
     language: Language = "auto"
     speak: bool = False
