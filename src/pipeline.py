@@ -22,7 +22,7 @@ from src.agent.graph import build_graph, run_turn
 from src.agent.llm import AgentLLM, OpenAIAgentLLM
 from src.guardrails.pii_redactor import PIIRedactor, PIIVault, RedactionEvent
 from src.speech.bhashini import BHASHINI_LANGUAGES, BhashiniClient, BhashiniError
-from src.speech.openai_speech import OpenAISpeech, SpeechError, speakable
+from src.speech.openai_speech import OpenAISpeech, SpeechError, Transcript, speakable
 from src.telemetry import TurnTrace, bind_trace, persist, stage
 
 logger = logging.getLogger("vaanisetu.pipeline")
@@ -139,7 +139,7 @@ class VaaniSetuPipeline:
     def vault(self, thread_id: str) -> PIIVault:
         return self._vaults.setdefault(thread_id, PIIVault())
 
-    async def transcribe(self, audio_b64: str, language: str = "auto") -> str:
+    async def transcribe(self, audio_b64: str, language: str = "auto") -> Transcript:
         """Speech to text only, so the citizen can review (and edit) the question before sending.
 
         The reply language is not used as a recognition hint: speech models detect the spoken
@@ -148,7 +148,7 @@ class VaaniSetuPipeline:
         if self.bhashini is not None:
             lang = language if language in BHASHINI_LANGUAGES else "hi"
             source, _ = await self.bhashini.speech_to_english(audio_b64, lang)
-            return source.strip()
+            return Transcript(source.strip())
         if self.speech is not None:
             return await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", "auto")
         raise SpeechError("Voice isn't available")
@@ -203,8 +203,8 @@ class VaaniSetuPipeline:
                         language = lang if language == "auto" else language
                     else:
                         assert self.speech is not None
-                        transcript = await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", "auto")
-                        text = transcript
+                        heard = await self.speech.transcribe(base64.b64decode(audio_b64), "voice.wav", "auto")
+                        transcript = text = "" if heard.unclear else heard.text
                 except (BhashiniError, SpeechError) as exc:
                     logger.warning("Speech-to-text failed: %s", exc)
                     return self._early_result(trace, VOICE_UNAVAILABLE, ["asr_failed"])

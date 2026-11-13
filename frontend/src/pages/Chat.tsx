@@ -7,7 +7,12 @@ import { playAudio, stopAudio, usePlayingKey } from "../components/audioPlayer";
 import CardView from "../components/Cards";
 import { useChatSession, type UiMessage } from "../components/ChatSession";
 import { Button, Dots, Skeleton, Spinner, useToast } from "../components/ui";
-import { useRecorder } from "../components/useRecorder";
+import { SILENCE_RMS, useRecorder } from "../components/useRecorder";
+
+function silentMicMessage(device: string): string {
+  const which = device ? `Your microphone (${device})` : "Your microphone";
+  return `${which} sent no sound. Check that it isn't muted, or pick another mic from the mic icon in the browser's address bar, then try again.`;
+}
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -231,23 +236,30 @@ export default function ChatPage() {
   const [voice, setVoice] = useState<string | null>(null);
   const [fromVoice, setFromVoice] = useState(false); // the draft is a speech transcript under review
   const [transcribing, setTranscribing] = useState(false);
+  const [unsure, setUnsure] = useState(false); // the speech model was not confident about the transcript
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
   const languageRef = useRef(language);
   languageRef.current = language;
 
-  const recorder = useRecorder((wav, seconds) => {
+  const recorder = useRecorder(({ wav, seconds, peak, device }) => {
     if (seconds < 0.6) {
       notify("That was too short. Press the mic and speak your question.", "error");
+      return;
+    }
+    if (peak < SILENCE_RMS) {
+      // Never send silence: a speech model given no speech may return made-up text.
+      notify(silentMicMessage(device), "error");
       return;
     }
     setTranscribing(true);
     api
       .transcribe(wav, languageRef.current)
-      .then(({ text }) => {
+      .then(({ text, uncertain }) => {
         setDraft(text);
         setFromVoice(true);
+        setUnsure(uncertain);
         window.setTimeout(() => inputRef.current?.focus(), 0);
       })
       .catch((err: Error) => notify(err.message, "error"))
@@ -293,10 +305,15 @@ export default function ChatPage() {
     }
   }
 
+  function startRecording() {
+    stopAudio(); // a reply being read aloud must not end up in the recording
+    void recorder.start();
+  }
+
   function recordAgain() {
     setDraft("");
     setFromVoice(false);
-    void recorder.start();
+    startRecording();
   }
 
   const showWelcome = !id && !activeId && messages.length === 0;
@@ -395,7 +412,13 @@ export default function ChatPage() {
           <div className="voice-review">
             <div className="voice-review-text">
               <b>Check your question</b>
-              <span>This is what we heard. Fix anything that's wrong, then press Send.</span>
+              {unsure ? (
+                <span className="voice-review-warn">
+                  The recording wasn't clear, so this may not be what you said. Fix it or record again closer to the mic.
+                </span>
+              ) : (
+                <span>This is what we heard. Fix anything that's wrong, then press Send.</span>
+              )}
             </div>
             <div className="voice-review-actions">
               <Button type="button" size="sm" variant="secondary" onClick={recordAgain} disabled={streaming}>
@@ -425,7 +448,13 @@ export default function ChatPage() {
           {recording ? (
             <div className="recording">
               <span className="rec-dot" style={{ transform: `scale(${1 + recorder.level * 0.8})` }} />
-              <span className="rec-label">Listening… speak your question</span>
+              {recorder.seconds >= 2 && !recorder.heard ? (
+                <span className="rec-label rec-warn">
+                  No sound from your microphone{recorder.device ? ` (${recorder.device})` : ""}. Is it muted?
+                </span>
+              ) : (
+                <span className="rec-label">Listening… speak your question</span>
+              )}
               <span className="rec-time">0:{String(recorder.seconds).padStart(2, "0")}</span>
               <Button type="button" size="sm" variant="ghost" onClick={recorder.cancel}>
                 Cancel
@@ -461,7 +490,7 @@ export default function ChatPage() {
                   className="mic-btn"
                   type="button"
                   disabled={streaming}
-                  onClick={() => (reviewing ? recordAgain() : void recorder.start())}
+                  onClick={() => (reviewing ? recordAgain() : startRecording())}
                   title="Speak your question"
                 >
                   <MicIcon />

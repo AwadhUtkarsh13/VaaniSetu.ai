@@ -218,7 +218,7 @@ export const api = {
     const form = new FormData();
     form.append("audio", audio, "voice.wav");
     form.append("language", language);
-    return request<{ text: string }>("/api/chat/transcribe", { method: "POST", body: form });
+    return request<{ text: string; uncertain: boolean }>("/api/chat/transcribe", { method: "POST", body: form });
   },
 
   /** The reply read aloud (MP3/WAV), generated on demand from the stored, masked text. */

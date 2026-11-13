@@ -105,6 +105,8 @@
 .voice-review { max-width: 820px; margin: 0 auto 10px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 12px 14px; border-radius: var(--radius); background: var(--saffron-soft); border: 1px solid #fcd34d; animation: slide-up 0.25s var(--ease); }
 .voice-review-text b { display: block; font-size: 14px; color: #92400e; }
 .voice-review-text span { font-size: 13px; color: var(--text-2); }
+.voice-review-text .voice-review-warn { color: #b45309; font-weight: 600; }
+.rec-label.rec-warn { color: #b45309; }
 .voice-review-actions { display: flex; gap: 8px; }
 .composer.reviewing { border-color: #f59e0b; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15), var(--shadow); }
 

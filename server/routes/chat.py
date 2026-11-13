@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import array
 import base64
+import io
 import json
 import logging
+import math
+import sys
+import wave
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -75,7 +80,42 @@ async def _read_recording(audio: UploadFile) -> bytes:
         raise HTTPException(
             400, {"code": "too_short", "message": "That recording was too short. Hold the mic and speak."}
         )
+    level = speech_level(data)
+    if level is not None:
+        logger.info("Recording: %d bytes, loudest 20 ms frame %.4f", len(data), level)  # numbers only
+        if level < SILENCE_LEVEL:
+            raise HTTPException(
+                422,
+                {
+                    "code": "no_sound",
+                    "message": "Your microphone sent no sound. Check that it isn't muted and that the browser "
+                    "is using the right mic (the mic icon in the address bar), then try again.",
+                },
+            )
     return data
+
+
+SILENCE_LEVEL = 0.002  # loudest 20 ms frame (RMS, full scale = 1). Quiet speech measured ~0.005+.
+
+
+def speech_level(data: bytes) -> float | None:
+    """RMS of the loudest 20 ms frame of a 16-bit PCM WAV, or None if it isn't one."""
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            if w.getsampwidth() != 2:
+                return None
+            rate, channels = w.getframerate(), w.getnchannels()
+            samples = array.array("h", w.readframes(w.getnframes()))
+    except (wave.Error, EOFError):
+        return None
+    if sys.byteorder == "big":
+        samples.byteswap()
+    frame = max(1, rate * channels // 50)
+    loudest = 0.0
+    for i in range(0, len(samples), frame):
+        chunk = samples[i : i + frame]
+        loudest = max(loudest, math.sqrt(sum(s * s for s in chunk) / len(chunk)))
+    return loudest / 32768
 
 
 @router.post("/transcribe")
@@ -83,23 +123,35 @@ async def transcribe(
     audio: UploadFile = File(...),
     language: Language = Form("auto"),
     user: User = Depends(verified_user),
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Speech to text only. The web app shows the result for the citizen to check, edit or
-    re-record before it is sent as a question. The text is returned to this user only."""
+    re-record before it is sent as a question. The text is returned to this user only.
+    `uncertain` is true when the speech model itself was unsure (noisy or unclear audio)."""
     data = await _read_recording(audio)
     assert engine.pipeline is not None
     try:
-        text = await engine.pipeline.transcribe(base64.b64encode(data).decode("ascii"), language)
+        heard = await engine.pipeline.transcribe(base64.b64encode(data).decode("ascii"), language)
     except (BhashiniError, SpeechError) as exc:
         logger.warning("Transcription failed: %s", exc)
         raise HTTPException(
             502, {"code": "asr_failed", "message": "Couldn't understand the recording right now. Please try again."}
         ) from None
-    if not text:
+    if not heard.text:
         raise HTTPException(
-            422, {"code": "not_heard", "message": "I couldn't hear anything. Please try again, closer to the mic."}
+            422, {"code": "not_heard", "message": "I couldn't hear any words. Please try again, closer to the mic."}
         )
-    return {"text": text}
+    if heard.confidence is not None:
+        logger.info("Transcription confidence %.2f", heard.confidence)
+    if heard.unclear:
+        raise HTTPException(
+            422,
+            {
+                "code": "not_clear",
+                "message": "I couldn't make out the words (too much background noise?). "
+                "Please try again closer to the mic, or type your question.",
+            },
+        )
+    return {"text": heard.text, "uncertain": heard.uncertain}
 
 
 @router.post("/voice")

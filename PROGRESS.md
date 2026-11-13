@@ -41,6 +41,8 @@
 - Voice review before sending (edit / record again / discard), **Listen** button on every answer, readable source chips, and a routing fix for questions asked during an eligibility check (ADR-16).
 - Verified: 30-case benchmark all 1.00, 27/27 routing decisions, 14/14 real-browser checks of the new voice flow.
 
+- Fixed made-up voice transcripts (ADR-17): removed the transcription prompt that made the speech model invent PM-KISAN questions from silent or noisy audio; added a live "no sound from your microphone" warning, a server silence check and confidence gating. Verified live: 12/12 endpoint cases (silence, hiss, noise, EN/HI/Hinglish clean, quiet and noisy) and real-Chrome recorder checks (silent mic never uploaded; English and Hindi pension questions transcribed word for word).
+
 ## Next steps
 1. `git commit` and `git push` to https://github.com/AwadhUtkarsh13/VaaniSetu.ai (remote has one "Initial commit" with a README; merge on top of it).
 2. Optional: Bhashini or Sarvam AI keys as alternative speech providers.

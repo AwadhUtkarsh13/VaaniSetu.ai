@@ -7,17 +7,22 @@ English and code-mixed Hinglish speech, and costs well under a rupee per minute.
 
 from __future__ import annotations
 
+import math
 import re
+from dataclasses import dataclass
 
 from openai import AsyncOpenAI, OpenAIError
 
 from config.settings import Settings
 from src.telemetry import stage
 
-TRANSCRIBE_PROMPT = (
-    "An Indian citizen asking about PM-KISAN, Ayushman Bharat PM-JAY or filing a CPGRAMS "
-    "grievance. Speech may mix Hindi and English (Hinglish)."
-)
+# No transcription prompt on purpose: with a domain prompt ("...PM-KISAN, PM-JAY...") the model
+# invents a plausible scheme question when the audio is silent or noisy. Without one it returns
+# an empty string, which the app reports as "couldn't hear you".
+# Mean token probability of a transcript. Measured: clear or quiet speech in English / Hindi /
+# Hinglish scores >= 0.93; audio garbled by noise scores <= 0.24 (random words in other languages).
+UNCLEAR_BELOW = 0.3  # treated as "couldn't make out the words"
+LOW_CONFIDENCE = 0.6  # shown to the citizen with a "may be misheard" warning
 TTS_INSTRUCTIONS = (
     "Speak warmly and clearly at a calm, moderate pace, like a patient government help-desk "
     "assistant. Pronounce Hindi and Indian names naturally."
@@ -33,6 +38,20 @@ _SPOKEN_TOKEN = {
 
 class SpeechError(RuntimeError):
     """Transcription or synthesis failed upstream."""
+
+
+@dataclass(frozen=True)
+class Transcript:
+    text: str
+    confidence: float | None = None  # mean token probability (0-1); None if the provider has none
+
+    @property
+    def uncertain(self) -> bool:
+        return self.confidence is not None and self.confidence < LOW_CONFIDENCE
+
+    @property
+    def unclear(self) -> bool:
+        return self.confidence is not None and self.confidence < UNCLEAR_BELOW
 
 
 def speakable(text: str) -> str:
@@ -63,18 +82,21 @@ class OpenAISpeech:
         self._client = client
         self.settings = settings
 
-    async def transcribe(self, audio: bytes, filename: str = "voice.wav", language: str = "auto") -> str:
+    async def transcribe(self, audio: bytes, filename: str = "voice.wav", language: str = "auto") -> Transcript:
         try:
             with stage("asr_ms", "openai.transcribe"):
                 result = await self._client.audio.transcriptions.create(
                     model=self.settings.openai_transcribe_model,
                     file=(filename, audio),
-                    prompt=TRANSCRIBE_PROMPT,
+                    response_format="json",
+                    include=["logprobs"],
                     **({"language": lang} if (lang := transcription_language(language)) else {}),
                 )
         except OpenAIError as exc:
             raise SpeechError(f"Transcription failed: {type(exc).__name__}") from exc
-        return result.text.strip()
+        logprobs = [t.logprob for t in (getattr(result, "logprobs", None) or [])]
+        confidence = math.exp(sum(logprobs) / len(logprobs)) if logprobs else None
+        return Transcript(result.text.strip(), confidence)
 
     async def synthesize(self, text: str) -> bytes:
         """Return MP3 bytes for `text` (already localised and made speakable)."""
